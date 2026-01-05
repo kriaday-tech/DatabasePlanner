@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: drawdb-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-drawdb}
+      POSTGRES_USER: ${DB_USER:-drawdb_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-EXEC", "pg_isready -U ${DB_USER:-drawdb_user} -d ${DB_NAME:-drawdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - drawdb-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # DrawDB API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drawdb-api
+    ports:
+      - "${PORT:-9080}:9080"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 9080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-drawdb}
+      DB_USER: ${DB_USER:-drawdb_user}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
+      CLIENT_URLS: ${CLIENT_URLS:-http://localhost:3000}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      MAIL_SERVICE: ${MAIL_SERVICE:-}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - drawdb-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9080/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    driver: local
+    name: drawdb_postgres_data
+
+networks:
+  drawdb-network:
+    driver: bridge
+    name: drawdb_network
+
